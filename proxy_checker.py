@@ -29,7 +29,7 @@ from typing import List, Optional, Tuple
 
 # ==================== 配置 ====================
 GEMINI_TEST_URL = "https://generativelanguage.googleapis.com/v1/models"
-GEMINI_API_KEY = "AIzaSyB_mnMC-o0DExWyOlLfAZYuGlfJ_xEtZxI"
+GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
 TEST_TIMEOUT = 15  # 秒
 MAX_WORKERS = 3    # 并发数 (降低以避免端口冲突)
 LOCAL_PROXY_PORT_START = 10080  # 本地代理端口起始值
