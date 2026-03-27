@@ -6,5 +6,6 @@ build/
 *.egg
 
 data/
-
-.claude/
+data/*.txt
+api_configs.json
+.env

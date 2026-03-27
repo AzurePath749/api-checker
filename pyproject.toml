@@ -12,7 +12,12 @@ dependencies = [
 ]
 
 [project.scripts]
+# 入口文件位于项目根目录 main.py，需确保 PYTHONPATH 包含 src/
 api-checker = "main:main"
+
+[project.optional-dependencies]
+proxy = ["pproxy>=0.7.0"]
+dev = ["pytest>=7.0"]
 
 [tool.setuptools.packages.find]
 where = ["src"]

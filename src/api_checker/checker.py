@@ -3,8 +3,11 @@ import os
 import time
 import random
 import datetime
+import logging
 
 import requests
+from urllib3.util.retry import Retry
+from requests.adapters import HTTPAdapter
 
 from .providers import PROVIDERS
 from .errors import translate_error
@@ -79,7 +82,7 @@ def _print_response_info(result, show_raw=False, flush=False):
                 f"= 总计{usage.get('total_tokens', 'N/A')}"
             )
         meaning_parts.append("API连接正常")
-        print(f"   \033[91m返回含义: {' | '.join(meaning_parts)}\033[0m", flush=flush)
+        print(f"   \033[92m返回含义: {' | '.join(meaning_parts)}\033[0m", flush=flush)
     else:
         print(f"   状态: ❌ 失败", flush=flush)
         if result['error']:
@@ -104,6 +107,10 @@ def _print_response_info(result, show_raw=False, flush=False):
 class APIChecker:
     def __init__(self):
         self.session = requests.Session()
+        retry_strategy = Retry(total=3, backoff_factor=0.5, status_forcelist=[502, 503, 504])
+        adapter = HTTPAdapter(max_retries=retry_strategy)
+        self.session.mount("https://", adapter)
+        self.session.mount("http://", adapter)
 
     def clear_screen(self):
         os.system('cls' if os.name == 'nt' else 'clear')
@@ -165,10 +172,8 @@ class APIChecker:
                     if 'data' in data:
                         models = [m['id'] for m in data['data']]
                     return models if models else None
-            except Exception:
-                pass
-
-        if provider.get('is_anthropic'):
+            except Exception as e:
+                logging.debug(f"获取模型列表失败 (models_source_url): {e}")
             if 'bigmodel' in provider['base_url']:
                 return [
                     "glm-5", "glm-5-turbo", "glm-4.5", "glm-4.5-air",
@@ -189,7 +194,8 @@ class APIChecker:
         if provider.get('is_gemini'):
             try:
                 response = self.session.get(
-                    f"{provider['base_url']}{provider['models_endpoint']}?key={api_key}",
+                    f"{provider['base_url']}{provider['models_endpoint']}",
+                    headers={"x-goog-api-key": api_key},
                     timeout=15
                 )
                 if response.status_code == 200:
@@ -202,7 +208,8 @@ class APIChecker:
                                 models.append(name)
                     return models if models else None
                 return None
-            except Exception:
+            except Exception as e:
+                logging.debug(f"获取 Gemini 模型列表失败: {e}")
                 return None
 
         try:
@@ -227,7 +234,8 @@ class APIChecker:
                 return models[:50]
             else:
                 return None
-        except Exception:
+        except Exception as e:
+            logging.debug(f"获取模型列表失败: {e}")
             return None
 
     def test_single_request(self, provider, api_key, model=None):
@@ -261,8 +269,8 @@ class APIChecker:
                     "messages": [{"role": "user", "content": "你好"}]
                 }
             elif provider.get('is_gemini'):
-                url = f"{provider['base_url']}/models/{model}:generateContent?key={api_key}"
-                headers = {"Content-Type": "application/json"}
+                url = f"{provider['base_url']}/models/{model}:generateContent"
+                headers = {"Content-Type": "application/json", "x-goog-api-key": api_key}
                 body = {
                     "contents": [{"parts": [{"text": "你好"}]}],
                     "generationConfig": {"maxOutputTokens": 10}
@@ -486,7 +494,7 @@ class APIChecker:
             f.write("-"*40 + "\n")
             for item in results:
                 if item['result']['success']:
-                    f.write(f"{item['api_key']}\n")
+                    f.write(f"{_mask_api_key(item['api_key'])}\n")
                     success_keys.append(item['api_key'])
             if not success_keys:
                 f.write("(无)\n")
@@ -506,7 +514,7 @@ class APIChecker:
         if success_keys:
             print(f"\n✅ 可用的 API Key ({len(success_keys)} 个):")
             for key in success_keys:
-                print(f"   {key}")
+                print(f"   {_mask_api_key(key)}")
 
     def test_provider(self, provider_key):
         provider = PROVIDERS[provider_key]
@@ -579,32 +587,7 @@ class APIChecker:
                 time.sleep(wait_time)
 
             _print_request_info(result.get('request_info'), flush=True)
-
-            print("\n" + "─" * 50, flush=True)
-            print("📥 服务器响应:", flush=True)
-            print("─" * 50, flush=True)
-            print(f"   状态码: {result['status_code']}", flush=True)
-            print(f"   延迟: {result['latency']:.2f}s", flush=True)
-
-            if result['success']:
-                print(f"   状态: ✅ 成功", flush=True)
-                if result['response_text']:
-                    print(f"   📝 回复: {result['response_text'][:100]}", flush=True)
-                if result['usage']:
-                    usage = result['usage']
-                    print(f"   📊 Token: 输入{usage.get('prompt_tokens', 'N/A')} + 输出{usage.get('completion_tokens', 'N/A')} = 总计{usage.get('total_tokens', 'N/A')}", flush=True)
-            else:
-                print(f"   状态: ❌ 失败", flush=True)
-                if result['error']:
-                    print(f"   📋 错误信息:", flush=True)
-                    try:
-                        err_json = json.loads(result['error'])
-                        print(f"   {json.dumps(err_json, ensure_ascii=False, indent=3)}", flush=True)
-                    except Exception:
-                        print(f"   {result['error'][:200]}", flush=True)
-                    _, translation = translate_error(result['error'])
-                    if translation:
-                        print(f"   \033[91m💡 错误含义: {translation}\033[0m", flush=True)
+            _print_response_info(result, flush=True)
 
         print("\n" + "=" * 60)
         print("📊 批量测试结果汇总")
@@ -733,4 +716,7 @@ class APIChecker:
                 time.sleep(1)
 
     def close(self):
-        self.session.close()
+        try:
+            self.session.close()
+        except Exception:
+            pass

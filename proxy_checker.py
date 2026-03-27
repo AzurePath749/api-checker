@@ -62,6 +62,8 @@ class TestResult:
 def fetch_subscription(url: str) -> str:
     """获取订阅内容"""
     print(f"📡 正在获取订阅内容...")
+    if not url.startswith("https://"):
+        raise Exception("仅允许 HTTPS 协议的订阅链接")
     try:
         resp = requests.get(url, timeout=30)
         resp.raise_for_status()
@@ -69,7 +71,7 @@ def fetch_subscription(url: str) -> str:
         try:
             decoded = base64.b64decode(resp.text).decode('utf-8')
             return decoded
-        except:
+        except Exception:
             return resp.text
     except Exception as e:
         raise Exception(f"获取订阅失败: {e}")
@@ -120,7 +122,7 @@ def parse_ss_link(link: str) -> Optional[ProxyNode]:
                     method=method,
                     raw=link
                 )
-        except:
+        except Exception:
             pass
 
         # 格式2: base64(method:password)@server:port
@@ -238,13 +240,16 @@ def parse_vmess_link(link: str) -> Optional[ProxyNode]:
         return None
 
 def parse_vless_link(link: str) -> Optional[ProxyNode]:
-    """解析 VLESS 链接"""
+    """解析 VLESS 链接
+
+    格式: vless://uuid@server:port?encryption=none&security=tls&sni=xxx&type=tcp#name
+    """
     try:
         if not link.startswith("vless://"):
             return None
-        # VLESS 解析逻辑类似 Trojan
+        # TODO: 实现 VLESS 链接解析
         return None
-    except:
+    except Exception:
         return None
 
 def parse_trojan_link(link: str) -> Optional[ProxyNode]:
@@ -286,7 +291,7 @@ def parse_trojan_link(link: str) -> Optional[ProxyNode]:
             sni=params.get("sni", server),
             raw=link
         )
-    except:
+    except Exception:
         return None
 
 def parse_nodes(content: str) -> List[ProxyNode]:
@@ -323,12 +328,11 @@ def test_tcp_connection(node: ProxyNode) -> Tuple[bool, float, str]:
     """测试 TCP 连通性"""
     start = time.time()
     try:
-        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        sock.settimeout(TEST_TIMEOUT)
-        sock.connect((node.server, node.port))
-        latency = (time.time() - start) * 1000
-        sock.close()
-        return True, latency, ""
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+            sock.settimeout(TEST_TIMEOUT)
+            sock.connect((node.server, node.port))
+            latency = (time.time() - start) * 1000
+            return True, latency, ""
     except socket.timeout:
         return False, 0, "连接超时"
     except ConnectionRefusedError:
@@ -336,16 +340,11 @@ def test_tcp_connection(node: ProxyNode) -> Tuple[bool, float, str]:
     except Exception as e:
         return False, 0, str(e)
 
-_port_counter = 10080
-_port_lock = threading.Lock()
-
 def get_local_port() -> int:
-    """获取本地代理端口"""
-    global _port_counter
-    with _port_lock:
-        port = _port_counter
-        _port_counter += 1
-        return port
+    """获取本地代理端口（由系统分配）"""
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+        sock.bind(('', 0))
+        return sock.getsockname()[1]
 
 def test_ss_proxy_gemini(node: ProxyNode, local_port: int) -> Tuple[bool, str, str]:
     """通过 SS 代理测试 Gemini API
@@ -375,11 +374,16 @@ def test_ss_proxy_gemini(node: ProxyNode, local_port: int) -> Tuple[bool, str, s
             creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0
         )
 
-        # 等待代理启动
-        time.sleep(1)
-
-        if proc.poll() is not None:
-            return False, "", "pproxy 启动失败"
+        for _ in range(10):
+            if proc.poll() is not None:
+                return False, "", "pproxy 启动失败"
+            try:
+                with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as check_sock:
+                    check_sock.settimeout(0.2)
+                    check_sock.connect(('127.0.0.1', local_port))
+                break
+            except (ConnectionRefusedError, socket.timeout, OSError):
+                time.sleep(0.2)
 
         try:
             # 通过代理测试 Gemini API
@@ -390,12 +394,14 @@ def test_ss_proxy_gemini(node: ProxyNode, local_port: int) -> Tuple[bool, str, s
 
             # 构建 URL（如果有 API Key）
             test_url = GEMINI_TEST_URL
+            headers = {}
             if GEMINI_API_KEY:
-                test_url = f"{GEMINI_TEST_URL}?key={GEMINI_API_KEY}"
+                headers["x-goog-api-key"] = GEMINI_API_KEY
 
             start = time.time()
             resp = requests.get(
                 test_url,
+                headers=headers,
                 proxies=proxies,
                 timeout=TEST_TIMEOUT
             )
@@ -504,8 +510,6 @@ def print_results(results: List[TestResult]):
 
 def save_report(results: List[TestResult], filename: str = "proxy_report.txt"):
     """保存报告到文件"""
-    import os
-
     filepath = os.path.join(os.path.dirname(__file__), filename)
 
     with open(filepath, "w", encoding="utf-8") as f:
@@ -565,10 +569,11 @@ def main(subscription_url: str = None, test_gemini: bool = True):
 
     # 获取订阅链接
     if not subscription_url:
-        print("\n请输入订阅链接 (或直接回车使用默认):")
+        print("\n请输入订阅链接:")
         url = input(">>> ").strip()
         if not url:
-            url = "https://dbsub2.whtjdasha.com/s/53352af83586fce1e9805d7c05991f02"
+            print("❌ 订阅链接不能为空")
+            return
     else:
         url = subscription_url
 
