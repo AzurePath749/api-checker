@@ -18,7 +18,7 @@ RATE_LIMIT_HEADERS = [
     'x-request-id', 'ratelimit-limit', 'ratelimit-remaining',
 ]
 
-SENSITIVE_HEADER_KEYWORDS = ('key', 'token', 'auth')
+SENSITIVE_HEADER_KEYWORDS = ('key', 'token', 'auth', 'cookie', 'set-cookie')
 
 
 def _mask_api_key(api_key):
@@ -504,7 +504,7 @@ class APIChecker:
             for item in results:
                 if not item['result']['success']:
                     _, translation = translate_error(item['result'].get('error', ''))
-                    f.write(f"{item['api_key']} | {translation or '失败'}\n")
+                    f.write(f"{_mask_api_key(item['api_key'])} | {translation or '失败'}\n")
                     failed_keys.append(item['api_key'])
             if not failed_keys:
                 f.write("(无)\n")
@@ -700,20 +700,23 @@ class APIChecker:
         input("\n按回车返回主菜单...")
 
     def run(self):
-        while True:
-            self.show_main_menu()
-            choice = input("请选择: ").strip().upper()
+        try:
+            while True:
+                self.show_main_menu()
+                choice = input("请选择: ").strip().upper()
 
-            if choice == 'Q':
-                print("\n👋 再见!")
-                break
-            elif choice == '0':
-                self.test_custom()
-            elif choice in PROVIDERS:
-                self.test_provider(choice)
-            else:
-                print("无效选择，请重试")
-                time.sleep(1)
+                if choice == 'Q':
+                    print("\n👋 再见!")
+                    break
+                elif choice == '0':
+                    self.test_custom()
+                elif choice in PROVIDERS:
+                    self.test_provider(choice)
+                else:
+                    print("无效选择，请重试")
+                    time.sleep(1)
+        except KeyboardInterrupt:
+            print("\n\n👋 再见!")
 
     def close(self):
         try:

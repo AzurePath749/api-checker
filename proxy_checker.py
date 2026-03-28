@@ -165,7 +165,7 @@ def parse_hysteria2_link(link: str) -> Optional[ProxyNode]:
     格式: hysteria2://password@server:port?sni=xxx&insecure=1#name
     """
     try:
-        if not link.startswith("hysteria2://"):
+        if not link.startswith("hysteria2://") and not link.startswith("hy2://"):
             return None
 
         # 分离名称
@@ -177,7 +177,10 @@ def parse_hysteria2_link(link: str) -> Optional[ProxyNode]:
             link_part = link
 
         # hysteria2://password@server:port?params
-        content = link_part[13:]  # 去掉 "hysteria2://"
+        if link_part.startswith("hysteria2://"):
+            content = link_part[13:]
+        else:
+            content = link_part[6:]
 
         # 解析参数
         params = {}
@@ -241,14 +244,52 @@ def parse_vmess_link(link: str) -> Optional[ProxyNode]:
 
 def parse_vless_link(link: str) -> Optional[ProxyNode]:
     """解析 VLESS 链接
-
     格式: vless://uuid@server:port?encryption=none&security=tls&sni=xxx&type=tcp#name
     """
     try:
         if not link.startswith("vless://"):
             return None
-        # TODO: 实现 VLESS 链接解析
-        return None
+
+        content = link[8:]
+
+        name = ""
+        if "#" in content:
+            link_part, name_part = content.split("#", 1)
+            name = urllib.parse.unquote(name_part)
+        else:
+            link_part = content
+
+        params = {}
+        if "?" in link_part:
+            main_part, query = link_part.split("?", 1)
+            for param in query.split("&"):
+                if "=" in param:
+                    k, v = param.split("=", 1)
+                    params[k] = urllib.parse.unquote(v)
+        else:
+            main_part = link_part
+
+        if "@" not in main_part:
+            return None
+
+        password, server_part = main_part.split("@", 1)
+
+        if ":" in server_part:
+            server, port = server_part.rsplit(":", 1)
+            port = int(port)
+        else:
+            return None
+
+        return ProxyNode(
+            name=name or f"VLESS-{server}:{port}",
+            protocol="vless",
+            server=server,
+            port=port,
+            password=password,
+            sni=params.get("sni", params.get("peer", server)),
+            insecure=params.get("allowInsecure", "0") == "1",
+            raw=link
+        )
     except Exception:
         return None
 
@@ -622,8 +663,11 @@ def main(subscription_url: str = None, test_gemini: bool = True):
     return results
 
 if __name__ == "__main__":
-    # 获取订阅链接
-    if len(sys.argv) > 1:
-        main(sys.argv[1])
-    else:
-        main()
+    try:
+        if len(sys.argv) > 1:
+            main(sys.argv[1])
+        else:
+            main()
+    except KeyboardInterrupt:
+        print("\n\n👋 用户中断，退出。")
+        sys.exit(0)
