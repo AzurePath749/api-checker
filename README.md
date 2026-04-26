@@ -1,4 +1,11 @@
-# 大模型 API 检测工具 使用说明书
+# 🤖 大模型 API 检测工具
+
+![Python](https://img.shields.io/badge/Python-3.10+-blue?style=flat-square)
+![License](https://img.shields.io/badge/license-MIT-green?style=flat-square)
+
+> 一键检测 25+ 家大模型 API 可用性、延迟、速率限制，支持批量 Key 压力测试。
+
+---
 
 ## 目录
 
